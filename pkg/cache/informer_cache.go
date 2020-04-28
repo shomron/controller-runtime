@@ -14,7 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cache
+// Modified from the original source (available at
+// https://github.com/kubernetes-sigs/controller-runtime/tree/v0.6.0/pkg/cache)
+
+package dynamiccache
 
 import (
 	"context"
@@ -22,20 +25,22 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/open-policy-agent/gatekeeper/third_party/sigs.k8s.io/controller-runtime/pkg/dynamiccache/internal"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/tools/cache"
-	"sigs.k8s.io/controller-runtime/pkg/cache/internal"
+	toolscache "k8s.io/client-go/tools/cache"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 )
 
 var (
-	_ Informers     = &informerCache{}
-	_ client.Reader = &informerCache{}
-	_ Cache         = &informerCache{}
+	_ cache.Informers = &dynamicInformerCache{}
+	_ client.Reader   = &dynamicInformerCache{}
+	_ cache.Cache     = &dynamicInformerCache{}
 )
 
 // ErrCacheNotStarted is returned when trying to read from the cache that wasn't started.
@@ -45,13 +50,13 @@ func (*ErrCacheNotStarted) Error() string {
 	return "the cache is not started, can not read objects"
 }
 
-// informerCache is a Kubernetes Object cache populated from InformersMap.  informerCache wraps an InformersMap.
-type informerCache struct {
+// dynamicInformerCache is a Kubernetes Object cache populated from InformersMap.  dynamicInformerCache wraps an InformersMap.
+type dynamicInformerCache struct {
 	*internal.InformersMap
 }
 
 // Get implements Reader
-func (ip *informerCache) Get(ctx context.Context, key client.ObjectKey, out runtime.Object) error {
+func (ip *dynamicInformerCache) Get(ctx context.Context, key client.ObjectKey, out runtime.Object) error {
 	gvk, err := apiutil.GVKForObject(out, ip.Scheme)
 	if err != nil {
 		return err
@@ -69,7 +74,7 @@ func (ip *informerCache) Get(ctx context.Context, key client.ObjectKey, out runt
 }
 
 // List implements Reader
-func (ip *informerCache) List(ctx context.Context, out runtime.Object, opts ...client.ListOption) error {
+func (ip *dynamicInformerCache) List(ctx context.Context, out runtime.Object, opts ...client.ListOption) error {
 
 	gvk, cacheTypeObj, err := ip.objectTypeForListObject(out)
 	if err != nil {
@@ -91,7 +96,7 @@ func (ip *informerCache) List(ctx context.Context, out runtime.Object, opts ...c
 // objectTypeForListObject tries to find the runtime.Object and associated GVK
 // for a single object corresponding to the passed-in list type. We need them
 // because they are used as cache map key.
-func (ip *informerCache) objectTypeForListObject(list runtime.Object) (*schema.GroupVersionKind, runtime.Object, error) {
+func (ip *dynamicInformerCache) objectTypeForListObject(list runtime.Object) (*schema.GroupVersionKind, runtime.Object, error) {
 	gvk, err := apiutil.GVKForObject(list, ip.Scheme)
 	if err != nil {
 		return nil, nil, err
@@ -131,7 +136,7 @@ func (ip *informerCache) objectTypeForListObject(list runtime.Object) (*schema.G
 }
 
 // GetInformerForKind returns the informer for the GroupVersionKind
-func (ip *informerCache) GetInformerForKind(ctx context.Context, gvk schema.GroupVersionKind) (Informer, error) {
+func (ip *dynamicInformerCache) GetInformerForKind(ctx context.Context, gvk schema.GroupVersionKind) (cache.Informer, error) {
 	// Map the gvk to an object
 	obj, err := ip.Scheme.New(gvk)
 	if err != nil {
@@ -146,7 +151,7 @@ func (ip *informerCache) GetInformerForKind(ctx context.Context, gvk schema.Grou
 }
 
 // GetInformer returns the informer for the obj
-func (ip *informerCache) GetInformer(ctx context.Context, obj runtime.Object) (Informer, error) {
+func (ip *dynamicInformerCache) GetInformer(ctx context.Context, obj runtime.Object) (cache.Informer, error) {
 	gvk, err := apiutil.GVKForObject(obj, ip.Scheme)
 	if err != nil {
 		return nil, err
@@ -159,9 +164,27 @@ func (ip *informerCache) GetInformer(ctx context.Context, obj runtime.Object) (I
 	return i.Informer, err
 }
 
+// GetInformerNonBlocking returns the informer for the obj without waiting for its cache to sync.
+func (ip *dynamicInformerCache) GetInformerNonBlocking(obj runtime.Object) (cache.Informer, error) {
+	gvk, err := apiutil.GVKForObject(obj, ip.Scheme)
+	if err != nil {
+		return nil, err
+	}
+
+	// Use a cancelled context to signal non-blocking
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, i, err := ip.InformersMap.Get(ctx, gvk, obj)
+	if err != nil && !apierrors.IsTimeout(err) {
+		return nil, err
+	}
+	return i.Informer, nil
+}
+
 // NeedLeaderElection implements the LeaderElectionRunnable interface
 // to indicate that this can be started without requiring the leader lock
-func (ip *informerCache) NeedLeaderElection() bool {
+func (ip *dynamicInformerCache) NeedLeaderElection() bool {
 	return false
 }
 
@@ -170,7 +193,7 @@ func (ip *informerCache) NeedLeaderElection() bool {
 // to List. For one-to-one compatibility with "normal" field selectors, only return one value.
 // The values may be anything.  They will automatically be prefixed with the namespace of the
 // given object, if present.  The objects passed are guaranteed to be objects of the correct type.
-func (ip *informerCache) IndexField(ctx context.Context, obj runtime.Object, field string, extractValue client.IndexerFunc) error {
+func (ip *dynamicInformerCache) IndexField(ctx context.Context, obj runtime.Object, field string, extractValue client.IndexerFunc) error {
 	informer, err := ip.GetInformer(ctx, obj)
 	if err != nil {
 		return err
@@ -178,7 +201,7 @@ func (ip *informerCache) IndexField(ctx context.Context, obj runtime.Object, fie
 	return indexByField(informer, field, extractValue)
 }
 
-func indexByField(indexer Informer, field string, extractor client.IndexerFunc) error {
+func indexByField(indexer cache.Informer, field string, extractor client.IndexerFunc) error {
 	indexFunc := func(objRaw interface{}) ([]string, error) {
 		// TODO(directxman12): check if this is the correct type?
 		obj, isObj := objRaw.(runtime.Object)
@@ -214,5 +237,16 @@ func indexByField(indexer Informer, field string, extractor client.IndexerFunc) 
 		return vals, nil
 	}
 
-	return indexer.AddIndexers(cache.Indexers{internal.FieldIndexName(field): indexFunc})
+	return indexer.AddIndexers(toolscache.Indexers{internal.FieldIndexName(field): indexFunc})
+}
+
+// Remove removes an informer specified by the obj argument from the cache and stops it if it existed.
+func (ip *dynamicInformerCache) Remove(obj runtime.Object) error {
+	gvk, err := apiutil.GVKForObject(obj, ip.Scheme)
+	if err != nil {
+		return err
+	}
+
+	ip.InformersMap.Remove(gvk, obj)
+	return nil
 }

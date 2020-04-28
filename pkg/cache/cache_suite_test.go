@@ -14,7 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cache_test
+// Modified from the original source (available at
+// https://github.com/kubernetes-sigs/controller-runtime/tree/v0.6.0/pkg/cache)
+
+package dynamiccache_test
 
 import (
 	"testing"

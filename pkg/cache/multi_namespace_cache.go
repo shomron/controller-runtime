@@ -14,7 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cache
+// Modified from the original source (available at
+// https://github.com/kubernetes-sigs/controller-runtime/tree/v0.6.0/pkg/cache)
+
+package dynamiccache
 
 import (
 	"context"
@@ -28,11 +31,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 	toolscache "k8s.io/client-go/tools/cache"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // NewCacheFunc - Function for creating a new cache from the options and a rest config
-type NewCacheFunc func(config *rest.Config, opts Options) (Cache, error)
+type NewCacheFunc func(config *rest.Config, opts cache.Options) (cache.Cache, error)
 
 // MultiNamespacedCacheBuilder - Builder function to create a new multi-namespaced cache.
 // This will scope the cache to a list of namespaces. Listing for all namespaces
@@ -40,12 +44,12 @@ type NewCacheFunc func(config *rest.Config, opts Options) (Cache, error)
 // to be used for excluding namespaces, this is better done via a Predicate. Also note that
 // you may face performance issues when using this with a high number of namespaces.
 func MultiNamespacedCacheBuilder(namespaces []string) NewCacheFunc {
-	return func(config *rest.Config, opts Options) (Cache, error) {
+	return func(config *rest.Config, opts cache.Options) (cache.Cache, error) {
 		opts, err := defaultOpts(config, opts)
 		if err != nil {
 			return nil, err
 		}
-		caches := map[string]Cache{}
+		caches := map[string]cache.Cache{}
 		for _, ns := range namespaces {
 			opts.Namespace = ns
 			c, err := New(config, opts)
@@ -63,15 +67,15 @@ func MultiNamespacedCacheBuilder(namespaces []string) NewCacheFunc {
 // operator to a list of namespaces instead of watching every namespace
 // in the cluster.
 type multiNamespaceCache struct {
-	namespaceToCache map[string]Cache
+	namespaceToCache map[string]cache.Cache
 	Scheme           *runtime.Scheme
 }
 
-var _ Cache = &multiNamespaceCache{}
+var _ cache.Cache = &multiNamespaceCache{}
 
 // Methods for multiNamespaceCache to conform to the Informers interface
-func (c *multiNamespaceCache) GetInformer(ctx context.Context, obj runtime.Object) (Informer, error) {
-	informers := map[string]Informer{}
+func (c *multiNamespaceCache) GetInformer(ctx context.Context, obj runtime.Object) (cache.Informer, error) {
+	informers := map[string]cache.Informer{}
 	for ns, cache := range c.namespaceToCache {
 		informer, err := cache.GetInformer(ctx, obj)
 		if err != nil {
@@ -82,8 +86,8 @@ func (c *multiNamespaceCache) GetInformer(ctx context.Context, obj runtime.Objec
 	return &multiNamespaceInformer{namespaceToInformer: informers}, nil
 }
 
-func (c *multiNamespaceCache) GetInformerForKind(ctx context.Context, gvk schema.GroupVersionKind) (Informer, error) {
-	informers := map[string]Informer{}
+func (c *multiNamespaceCache) GetInformerForKind(ctx context.Context, gvk schema.GroupVersionKind) (cache.Informer, error) {
+	informers := map[string]cache.Informer{}
 	for ns, cache := range c.namespaceToCache {
 		informer, err := cache.GetInformerForKind(ctx, gvk)
 		if err != nil {
@@ -95,13 +99,13 @@ func (c *multiNamespaceCache) GetInformerForKind(ctx context.Context, gvk schema
 }
 
 func (c *multiNamespaceCache) Start(stopCh <-chan struct{}) error {
-	for ns, cache := range c.namespaceToCache {
-		go func(ns string, cache Cache) {
+	for ns, entry := range c.namespaceToCache {
+		go func(ns string, cache cache.Cache) {
 			err := cache.Start(stopCh)
 			if err != nil {
 				log.Error(err, "multinamespace cache failed to start namespaced informer", "namespace", ns)
 			}
-		}(ns, cache)
+		}(ns, entry)
 	}
 	<-stopCh
 	return nil
@@ -181,10 +185,10 @@ func (c *multiNamespaceCache) List(ctx context.Context, list runtime.Object, opt
 
 // multiNamespaceInformer knows how to handle interacting with the underlying informer across multiple namespaces
 type multiNamespaceInformer struct {
-	namespaceToInformer map[string]Informer
+	namespaceToInformer map[string]cache.Informer
 }
 
-var _ Informer = &multiNamespaceInformer{}
+var _ cache.Informer = &multiNamespaceInformer{}
 
 // AddEventHandler adds the handler to each namespaced informer
 func (i *multiNamespaceInformer) AddEventHandler(handler toolscache.ResourceEventHandler) {

@@ -14,6 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Modified from the original source (available at
+// https://github.com/kubernetes-sigs/controller-runtime/tree/v0.6.0/pkg/cache)
+
 package internal
 
 import (
@@ -90,6 +93,20 @@ func (m *InformersMap) Get(ctx context.Context, gvk schema.GroupVersionKind, obj
 	}
 
 	return m.structured.Get(ctx, gvk, obj)
+}
+
+// Remove will remove an new Informer from the InformersMap and stop it if it exists.
+func (m *InformersMap) Remove(gvk schema.GroupVersionKind, obj runtime.Object) {
+	_, isUnstructured := obj.(*unstructured.Unstructured)
+	_, isUnstructuredList := obj.(*unstructured.UnstructuredList)
+	isUnstructured = isUnstructured || isUnstructuredList
+
+	switch {
+	case isUnstructured:
+		m.unstructured.Remove(gvk)
+	default:
+		m.structured.Remove(gvk)
+	}
 }
 
 // newStructuredInformersMap creates a new InformersMap for structured objects.

@@ -14,6 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// Modified from the original source (available at
+// https://github.com/kubernetes-sigs/controller-runtime/tree/v0.6.0/pkg/cache)
+
 // Package cache provides object caches that act as caching client.Reader
 // instances and help drive Kubernetes-object-based event handlers.
-package cache
+// The code is forked from controller-runtime's cache package and has been
+// modified to support dynamic addition and removal of informers.
+package dynamiccache

@@ -14,7 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cache_test
+// Modified from the original source (available at
+// https://github.com/kubernetes-sigs/controller-runtime/tree/v0.6.0/pkg/cache)
+
+package dynamiccache_test
 
 import (
 	"context"
@@ -34,6 +37,8 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/open-policy-agent/gatekeeper/third_party/sigs.k8s.io/controller-runtime/pkg/dynamiccache"
 )
 
 const testNamespaceOne = "test-namespace-1"
@@ -73,10 +78,10 @@ func deletePod(pod runtime.Object) {
 }
 
 var _ = Describe("Informer Cache", func() {
-	CacheTest(cache.New)
+	CacheTest(dynamiccache.New)
 })
 var _ = Describe("Multi-Namespace Informer Cache", func() {
-	CacheTest(cache.MultiNamespacedCacheBuilder([]string{testNamespaceOne, testNamespaceTwo, "default"}))
+	CacheTest(dynamiccache.MultiNamespacedCacheBuilder([]string{testNamespaceOne, testNamespaceTwo, "default"}))
 })
 
 // nolint: gocyclo
@@ -390,7 +395,7 @@ func CacheTest(createCacheFunc func(config *rest.Config, opts cache.Options) (ca
 
 				It("should be able to restrict cache to a namespace", func() {
 					By("creating a namespaced cache")
-					namespacedCache, err := cache.New(cfg, cache.Options{Namespace: testNamespaceOne})
+					namespacedCache, err := dynamiccache.New(cfg, cache.Options{Namespace: testNamespaceOne})
 					Expect(err).NotTo(HaveOccurred())
 
 					By("running the cache and waiting for it to sync")
@@ -561,7 +566,7 @@ func CacheTest(createCacheFunc func(config *rest.Config, opts cache.Options) (ca
 
 				It("should be able to index an object field then retrieve objects by that field", func() {
 					By("creating the cache")
-					informer, err := cache.New(cfg, cache.Options{})
+					informer, err := dynamiccache.New(cfg, cache.Options{})
 					Expect(err).NotTo(HaveOccurred())
 
 					By("indexing the restartPolicy field of the Pod object before starting")
@@ -676,7 +681,7 @@ func CacheTest(createCacheFunc func(config *rest.Config, opts cache.Options) (ca
 
 				It("should be able to index an object field then retrieve objects by that field", func() {
 					By("creating the cache")
-					informer, err := cache.New(cfg, cache.Options{})
+					informer, err := dynamiccache.New(cfg, cache.Options{})
 					Expect(err).NotTo(HaveOccurred())
 
 					By("indexing the restartPolicy field of the Pod object before starting")
